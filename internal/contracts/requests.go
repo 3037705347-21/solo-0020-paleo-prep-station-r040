@@ -8,11 +8,18 @@ type RegisterSpecimenRequest struct {
 	JacketNotes   string `json:"jacket_notes"`
 }
 
+type CheckpointRequest struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	GatePercent int    `json:"gate_percent"`
+}
+
 type CreatePlanRequest struct {
-	Objective      string `json:"objective"`
-	Method         string `json:"method"`
-	Adhesive       string `json:"adhesive"`
-	TargetExposure int    `json:"target_exposure"`
+	Objective      string              `json:"objective"`
+	Method         string              `json:"method"`
+	Adhesive       string              `json:"adhesive"`
+	TargetExposure int                 `json:"target_exposure"`
+	Checkpoints    []CheckpointRequest `json:"checkpoints"`
 }
 
 type ApprovalRequest struct {
@@ -30,4 +37,11 @@ type ReleaseRequest struct {
 	Purpose    string `json:"purpose"`
 	Recipient  string `json:"recipient"`
 	ApprovedBy string `json:"approved_by"`
+}
+
+type InspectionRequest struct {
+	CheckpointKey string `json:"checkpoint_key"`
+	Result        string `json:"result"`
+	InspectedBy   string `json:"inspected_by"`
+	Note          string `json:"note"`
 }

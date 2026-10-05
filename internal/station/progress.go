@@ -41,6 +41,9 @@ func (s *Service) LogProgress(
 		if err != nil {
 			return err
 		}
+		if err := plan.EnsureProgressAllowed(m.InspectionsForPlan(planID), entry.Percent); err != nil {
+			return err
+		}
 		if plan.Status == domain.PlanApproved {
 			if err := plan.Begin(s.now()); err != nil {
 				return err

@@ -16,19 +16,26 @@ const (
 	PlanCancelled PlanStatus = "cancelled"
 )
 
+type CheckpointDef struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	GatePercent int    `json:"gate_percent"`
+}
+
 type PrepPlan struct {
-	ID             string     `json:"id"`
-	SpecimenID     string     `json:"specimen_id"`
-	Objective      string     `json:"objective"`
-	Method         string     `json:"method"`
-	Adhesive       string     `json:"adhesive"`
-	TargetExposure int        `json:"target_exposure"`
-	Status         PlanStatus `json:"status"`
-	ApprovedBy     string     `json:"approved_by,omitempty"`
-	ApprovedAt     *time.Time `json:"approved_at,omitempty"`
-	Version        int        `json:"version"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             string          `json:"id"`
+	SpecimenID     string          `json:"specimen_id"`
+	Objective      string          `json:"objective"`
+	Method         string          `json:"method"`
+	Adhesive       string          `json:"adhesive"`
+	TargetExposure int             `json:"target_exposure"`
+	Checkpoints    []CheckpointDef `json:"checkpoints"`
+	Status         PlanStatus      `json:"status"`
+	ApprovedBy     string          `json:"approved_by,omitempty"`
+	ApprovedAt     *time.Time      `json:"approved_at,omitempty"`
+	Version        int             `json:"version"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 func NewPrepPlan(
@@ -38,6 +45,7 @@ func NewPrepPlan(
 	method string,
 	adhesive string,
 	targetExposure int,
+	checkpoints []CheckpointDef,
 	now time.Time,
 ) (PrepPlan, error) {
 	if id == "" {
@@ -64,6 +72,10 @@ func NewPrepPlan(
 	if targetExposure == 0 {
 		return PrepPlan{}, contracts.Invalid("invalid_target_exposure", "目标暴露比例必须大于零")
 	}
+	defs, err := validateCheckpoints(checkpoints)
+	if err != nil {
+		return PrepPlan{}, err
+	}
 	return PrepPlan{
 		ID:             id,
 		SpecimenID:     specimen.ID,
@@ -71,6 +83,7 @@ func NewPrepPlan(
 		Method:         approach,
 		Adhesive:       adhesiveValue,
 		TargetExposure: targetExposure,
+		Checkpoints:    defs,
 		Status:         PlanDraft,
 		Version:        1,
 		CreatedAt:      now.UTC(),

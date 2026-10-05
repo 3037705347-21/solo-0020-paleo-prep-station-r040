@@ -31,7 +31,10 @@ go run ./cmd/paleo-prep-station --addr 127.0.0.1:18133
 - `GET /plans/{id}`
 - `POST /plans/{id}/approval`
 - `POST /plans/{id}/progress`
+- `POST /plans/{id}/inspections`
 - `POST /specimens/{id}/release`
+
+方案在创建时定义关键阶段检查点（阈值升序，最终检查阈值为 100）。进度不能越过尚未通过的检查点，结论为退回时必须先重新检查通过；方案快照会公开每个检查点的状态、检查人和检查结论。
 
 ## 本地验证
 
@@ -42,6 +45,7 @@ go run ./cmd/workflowcheck --workflow register-specimen
 go run ./cmd/workflowcheck --workflow approve-prep-plan
 go run ./cmd/workflowcheck --workflow log-preparation
 go run ./cmd/workflowcheck --workflow release-for-study
+go run ./cmd/workflowcheck --workflow stage-inspection
 ```
 
 这些检查会启动临时 HTTP 处理器并调用真实公共路由。

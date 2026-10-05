@@ -48,3 +48,43 @@ func validatePercent(value int) error {
 	}
 	return nil
 }
+
+const maxCheckpoints = 20
+
+func validateCheckpoints(defs []CheckpointDef) ([]CheckpointDef, error) {
+	if len(defs) == 0 {
+		return nil, contracts.Invalid("checkpoints_required", "方案必须定义关键阶段检查点")
+	}
+	if len(defs) > maxCheckpoints {
+		return nil, contracts.Invalid("too_many_checkpoints", "检查点数量超出限制")
+	}
+	cleaned := make([]CheckpointDef, 0, len(defs))
+	seen := make(map[string]bool, len(defs))
+	previousGate := 0
+	for _, def := range defs {
+		key, err := requiredText("检查点标识", def.Key, 40)
+		if err != nil {
+			return nil, err
+		}
+		if seen[key] {
+			return nil, contracts.Invalid("duplicate_checkpoint_key", "检查点标识不能重复")
+		}
+		seen[key] = true
+		name, err := requiredText("检查点名称", def.Name, 80)
+		if err != nil {
+			return nil, err
+		}
+		if def.GatePercent < 1 || def.GatePercent > 100 {
+			return nil, contracts.Invalid("invalid_gate_percent", "检查点阈值必须位于 1 到 100 之间")
+		}
+		if def.GatePercent <= previousGate {
+			return nil, contracts.Invalid("checkpoint_gate_order", "检查点阈值必须按升序排列")
+		}
+		previousGate = def.GatePercent
+		cleaned = append(cleaned, CheckpointDef{Key: key, Name: name, GatePercent: def.GatePercent})
+	}
+	if cleaned[len(cleaned)-1].GatePercent != 100 {
+		return nil, contracts.Invalid("final_checkpoint_required", "最终检查点阈值必须为 100")
+	}
+	return cleaned, nil
+}

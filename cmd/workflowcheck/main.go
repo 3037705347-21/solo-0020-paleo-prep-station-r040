@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"time"
 
 	"example.com/paleo-prep-station/internal/contracts"
@@ -30,11 +31,23 @@ type planView struct {
 	Status     string `json:"status"`
 }
 
+type checkpointView struct {
+	Key         string `json:"key"`
+	Status      string `json:"status"`
+	Result      string `json:"result"`
+	InspectedBy string `json:"inspected_by"`
+}
+
 type planSnapshot struct {
-	Plan     planView `json:"plan"`
-	Progress []struct {
+	Plan        planView         `json:"plan"`
+	Checkpoints []checkpointView `json:"checkpoints"`
+	Progress    []struct {
 		Percent int `json:"percent"`
 	} `json:"progress"`
+}
+
+type errorView struct {
+	Code string `json:"code"`
 }
 
 type releaseView struct {
@@ -117,6 +130,12 @@ func run(workflow string) error {
 		if err := recordProgress(client, server.URL, plan.ID, 35, "矩阵剥离"); err != nil {
 			return err
 		}
+		if err := recordInspection(client, server.URL, plan.ID, "matrix-removal", "passed"); err != nil {
+			return err
+		}
+		if err := recordInspection(client, server.URL, plan.ID, "surface-consolidation", "passed"); err != nil {
+			return err
+		}
 		if err := recordProgress(client, server.URL, plan.ID, 100, "表面加固"); err != nil {
 			return err
 		}
@@ -139,6 +158,12 @@ func run(workflow string) error {
 	case "release-for-study":
 		specimen, plan, err := completedPlanSetup(client, server.URL)
 		if err != nil {
+			return err
+		}
+		if err := recordInspection(client, server.URL, plan.ID, "matrix-removal", "passed"); err != nil {
+			return err
+		}
+		if err := recordInspection(client, server.URL, plan.ID, "surface-consolidation", "passed"); err != nil {
 			return err
 		}
 		if err := recordProgress(client, server.URL, plan.ID, 100, "表面加固"); err != nil {
@@ -168,6 +193,76 @@ func run(workflow string) error {
 		}
 		if fetched.Status != "available" {
 			return fmt.Errorf("expected available specimen, got %s", fetched.Status)
+		}
+		return nil
+
+	case "stage-inspection":
+		specimen, plan, err := completedPlanSetup(client, server.URL)
+		if err != nil {
+			return err
+		}
+		progressURL := server.URL + "/plans/" + plan.ID + "/progress"
+		inspectionsURL := server.URL + "/plans/" + plan.ID + "/inspections"
+		// 达到检查点阈值允许登记，越过未通过的检查点被拒绝。
+		if err := recordProgress(client, server.URL, plan.ID, 35, "矩阵剥离"); err != nil {
+			return err
+		}
+		if err := expectConflict(client, progressURL, progressBody(50, "继续剥离"), "checkpoint_not_passed"); err != nil {
+			return err
+		}
+		// 前置检查点未通过时，后续检查点不能登记。
+		if err := expectConflict(client, inspectionsURL, inspectionBody("surface-consolidation", "passed"), "checkpoint_out_of_order"); err != nil {
+			return err
+		}
+		// 退回结论会阻断后续进度，直到重新检查通过。
+		if err := recordInspection(client, server.URL, plan.ID, "matrix-removal", "rejected"); err != nil {
+			return err
+		}
+		if err := expectConflict(client, progressURL, progressBody(40, "返工剥离"), "checkpoint_rejected"); err != nil {
+			return err
+		}
+		if err := recordInspection(client, server.URL, plan.ID, "matrix-removal", "passed"); err != nil {
+			return err
+		}
+		// 已通过的检查点不能重复检查。
+		if err := expectConflict(client, inspectionsURL, inspectionBody("matrix-removal", "passed"), "checkpoint_already_passed"); err != nil {
+			return err
+		}
+		if err := recordProgress(client, server.URL, plan.ID, 60, "粗修成形"); err != nil {
+			return err
+		}
+		// 最终检查通过前不能完成方案。
+		if err := expectConflict(client, progressURL, progressBody(100, "表面加固"), "final_checkpoint_not_passed"); err != nil {
+			return err
+		}
+		if err := recordInspection(client, server.URL, plan.ID, "surface-consolidation", "passed"); err != nil {
+			return err
+		}
+		// 并发完成请求必须恰好成功一个，其余得到确定的冲突结果。
+		if err := completeConcurrently(client, progressURL); err != nil {
+			return err
+		}
+		var snapshot planSnapshot
+		if err := requestJSON(client, http.MethodGet, server.URL+"/plans/"+plan.ID, nil, http.StatusOK, &snapshot); err != nil {
+			return err
+		}
+		if snapshot.Plan.Status != "completed" || len(snapshot.Progress) != 3 {
+			return errors.New("plan did not complete with exactly three progress entries")
+		}
+		if len(snapshot.Checkpoints) != 2 {
+			return errors.New("plan snapshot must expose both checkpoints")
+		}
+		for _, checkpoint := range snapshot.Checkpoints {
+			if checkpoint.Status != "passed" || checkpoint.Result != "passed" || checkpoint.InspectedBy != "qa-wang" {
+				return fmt.Errorf("checkpoint %s missing public inspection record", checkpoint.Key)
+			}
+		}
+		var fetchedSpecimen specimenView
+		if err := requestJSON(client, http.MethodGet, server.URL+"/specimens/"+specimen.ID, nil, http.StatusOK, &fetchedSpecimen); err != nil {
+			return err
+		}
+		if fetchedSpecimen.Status != "stabilized" {
+			return fmt.Errorf("expected stabilized specimen, got %s", fetchedSpecimen.Status)
 		}
 		return nil
 	default:
@@ -205,6 +300,10 @@ func createPlan(client *http.Client, baseURL, specimenID string) (planView, erro
 			Method:         "手工显微剥离",
 			Adhesive:       "可逆树脂",
 			TargetExposure: 80,
+			Checkpoints: []contracts.CheckpointRequest{
+				{Key: "matrix-removal", Name: "矩阵剥离", GatePercent: 35},
+				{Key: "surface-consolidation", Name: "表面加固", GatePercent: 100},
+			},
 		},
 		http.StatusCreated,
 		&plan,
@@ -241,15 +340,105 @@ func recordProgress(client *http.Client, baseURL, planID string, percent int, st
 		client,
 		http.MethodPost,
 		baseURL+"/plans/"+planID+"/progress",
-		contracts.ProgressRequest{
-			Stage:      stage,
-			Percent:    percent,
-			Note:       "本地链路检查",
-			RecordedBy: "preparator-chen",
-		},
+		progressBody(percent, stage),
 		http.StatusCreated,
 		&ignored,
 	)
+}
+
+func progressBody(percent int, stage string) contracts.ProgressRequest {
+	return contracts.ProgressRequest{
+		Stage:      stage,
+		Percent:    percent,
+		Note:       "本地链路检查",
+		RecordedBy: "preparator-chen",
+	}
+}
+
+func recordInspection(client *http.Client, baseURL, planID, checkpointKey, result string) error {
+	var ignored struct{}
+	return requestJSON(
+		client,
+		http.MethodPost,
+		baseURL+"/plans/"+planID+"/inspections",
+		inspectionBody(checkpointKey, result),
+		http.StatusCreated,
+		&ignored,
+	)
+}
+
+func inspectionBody(checkpointKey, result string) contracts.InspectionRequest {
+	return contracts.InspectionRequest{
+		CheckpointKey: checkpointKey,
+		Result:        result,
+		InspectedBy:   "qa-wang",
+		Note:          "阶段质量确认",
+	}
+}
+
+func expectConflict(client *http.Client, url string, body any, wantCode string) error {
+	var failure errorView
+	if err := requestJSON(client, http.MethodPost, url, body, http.StatusConflict, &failure); err != nil {
+		return err
+	}
+	if failure.Code != wantCode {
+		return fmt.Errorf("expected conflict code %s, got %s", wantCode, failure.Code)
+	}
+	return nil
+}
+
+func completeConcurrently(client *http.Client, progressURL string) error {
+	const attempts = 5
+	statuses := make(chan int, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			status, err := postStatus(client, progressURL, progressBody(100, "表面加固"))
+			if err != nil {
+				status = -1
+			}
+			statuses <- status
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	succeeded := 0
+	for status := range statuses {
+		switch status {
+		case http.StatusCreated:
+			succeeded++
+		case http.StatusConflict:
+		default:
+			return fmt.Errorf("unexpected concurrent progress status %d", status)
+		}
+	}
+	if succeeded != 1 {
+		return fmt.Errorf("expected exactly one concurrent completion, got %d", succeeded)
+	}
+	return nil
+}
+
+func postStatus(client *http.Client, url string, body any) (int, error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	request, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(encoded))
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
 }
 
 func requestJSON(

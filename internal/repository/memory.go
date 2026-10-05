@@ -8,10 +8,11 @@ import (
 )
 
 type state struct {
-	specimens map[string]domain.Specimen
-	plans     map[string]domain.PrepPlan
-	progress  map[string][]domain.ProgressEntry
-	releases  map[string]domain.ReleaseRecord
+	specimens   map[string]domain.Specimen
+	plans       map[string]domain.PrepPlan
+	progress    map[string][]domain.ProgressEntry
+	inspections map[string][]domain.Inspection
+	releases    map[string]domain.ReleaseRecord
 }
 
 type MemoryRepository struct {
@@ -22,10 +23,11 @@ type MemoryRepository struct {
 func NewMemory() *MemoryRepository {
 	return &MemoryRepository{
 		state: state{
-			specimens: make(map[string]domain.Specimen),
-			plans:     make(map[string]domain.PrepPlan),
-			progress:  make(map[string][]domain.ProgressEntry),
-			releases:  make(map[string]domain.ReleaseRecord),
+			specimens:   make(map[string]domain.Specimen),
+			plans:       make(map[string]domain.PrepPlan),
+			progress:    make(map[string][]domain.ProgressEntry),
+			inspections: make(map[string][]domain.Inspection),
+			releases:    make(map[string]domain.ReleaseRecord),
 		},
 	}
 }
@@ -50,10 +52,11 @@ func (r *MemoryRepository) Mutate(fn func(*Mutation) error) error {
 
 func cloneMutation(source state) *Mutation {
 	copied := state{
-		specimens: make(map[string]domain.Specimen, len(source.specimens)),
-		plans:     make(map[string]domain.PrepPlan, len(source.plans)),
-		progress:  make(map[string][]domain.ProgressEntry, len(source.progress)),
-		releases:  make(map[string]domain.ReleaseRecord, len(source.releases)),
+		specimens:   make(map[string]domain.Specimen, len(source.specimens)),
+		plans:       make(map[string]domain.PrepPlan, len(source.plans)),
+		progress:    make(map[string][]domain.ProgressEntry, len(source.progress)),
+		inspections: make(map[string][]domain.Inspection, len(source.inspections)),
+		releases:    make(map[string]domain.ReleaseRecord, len(source.releases)),
 	}
 	for key, value := range source.specimens {
 		copied.specimens[key] = value
@@ -63,6 +66,9 @@ func cloneMutation(source state) *Mutation {
 	}
 	for key, values := range source.progress {
 		copied.progress[key] = append([]domain.ProgressEntry(nil), values...)
+	}
+	for key, values := range source.inspections {
+		copied.inspections[key] = append([]domain.Inspection(nil), values...)
 	}
 	for key, value := range source.releases {
 		copied.releases[key] = value
@@ -150,6 +156,14 @@ func (m *Mutation) ProgressForPlan(planID string) []domain.ProgressEntry {
 
 func (m *Mutation) AppendProgress(value domain.ProgressEntry) {
 	m.state.progress[value.PlanID] = append(m.state.progress[value.PlanID], value)
+}
+
+func (m *Mutation) InspectionsForPlan(planID string) []domain.Inspection {
+	return append([]domain.Inspection(nil), m.state.inspections[planID]...)
+}
+
+func (m *Mutation) AppendInspection(value domain.Inspection) {
+	m.state.inspections[value.PlanID] = append(m.state.inspections[value.PlanID], value)
 }
 
 func (m *Mutation) ReleaseForSpecimen(specimenID string) (domain.ReleaseRecord, bool) {
