@@ -26,6 +26,13 @@ func (s *Service) CreatePlan(
 		if m.HasOpenPlan(specimenID) {
 			return contracts.Conflict("open_plan_exists", "该标本已存在未结束的修复方案")
 		}
+		checkpoints := make([]domain.CheckpointSpec, 0, len(request.Checkpoints))
+		for _, item := range request.Checkpoints {
+			checkpoints = append(checkpoints, domain.CheckpointSpec{
+				Stage:   item.Stage,
+				Percent: item.Percent,
+			})
+		}
 		plan, err := domain.NewPrepPlan(
 			s.nextID("plan"),
 			specimen,
@@ -33,6 +40,7 @@ func (s *Service) CreatePlan(
 			request.Method,
 			request.Adhesive,
 			request.TargetExposure,
+			checkpoints,
 			s.now(),
 		)
 		if err != nil {
@@ -92,9 +100,12 @@ func (s *Service) GetPlan(ctx context.Context, planID string) (PlanSnapshot, err
 		if !ok {
 			return notFoundPlan(planID)
 		}
+		inspections := m.InspectionsForPlan(planID)
 		snapshot = PlanSnapshot{
-			Plan:     plan,
-			Progress: m.ProgressForPlan(planID),
+			Plan:        plan,
+			Checkpoints: plan.CheckpointStatuses(inspections),
+			Progress:    m.ProgressForPlan(planID),
+			Inspections: inspections,
 		}
 		return nil
 	})

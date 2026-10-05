@@ -9,10 +9,16 @@ type RegisterSpecimenRequest struct {
 }
 
 type CreatePlanRequest struct {
-	Objective      string `json:"objective"`
-	Method         string `json:"method"`
-	Adhesive       string `json:"adhesive"`
-	TargetExposure int    `json:"target_exposure"`
+	Objective      string              `json:"objective"`
+	Method         string              `json:"method"`
+	Adhesive       string              `json:"adhesive"`
+	TargetExposure int                 `json:"target_exposure"`
+	Checkpoints    []CheckpointRequest `json:"checkpoints"`
+}
+
+type CheckpointRequest struct {
+	Stage   string `json:"stage"`
+	Percent int    `json:"percent"`
 }
 
 type ApprovalRequest struct {
@@ -24,6 +30,13 @@ type ProgressRequest struct {
 	Percent    int    `json:"percent"`
 	Note       string `json:"note"`
 	RecordedBy string `json:"recorded_by"`
+}
+
+type InspectionRequest struct {
+	Checkpoint  string `json:"checkpoint"`
+	Outcome     string `json:"outcome"`
+	InspectedBy string `json:"inspected_by"`
+	Note        string `json:"note"`
 }
 
 type ReleaseRequest struct {

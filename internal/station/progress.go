@@ -41,6 +41,12 @@ func (s *Service) LogProgress(
 		if err != nil {
 			return err
 		}
+		if blocker, blocked := plan.FirstBlockingCheckpoint(entry.Percent, m.InspectionsForPlan(planID)); blocked {
+			return contracts.Conflict(
+				"checkpoint_not_passed",
+				"关键阶段「"+blocker.Stage+"」尚未通过检查，进度不能越过",
+			)
+		}
 		if plan.Status == domain.PlanApproved {
 			if err := plan.Begin(s.now()); err != nil {
 				return err
